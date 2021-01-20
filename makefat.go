@@ -14,7 +14,8 @@ const (
 	MagicFat64 = macho.MagicFat + 1 // TODO: add to stdlib (...when it works)
 
 	// Alignment wanted for each sub-file.
-	alignBits = 12
+	// amd64 needs 12 bits, arm64 needs 14. We choose the max of all requirements here.
+	alignBits = 14
 	align     = 1 << alignBits
 )
 

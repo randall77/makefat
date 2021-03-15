@@ -20,6 +20,11 @@ const (
 )
 
 func main() {
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "usage: %s <output file> <input file 1> <input file 2> ...\n", os.Args[0])
+		os.Exit(2)
+	}
+
 	// Read input files.
 	type input struct {
 		data   []byte

@@ -6,7 +6,7 @@ import (
 	"debug/macho"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 )
 
@@ -27,36 +27,56 @@ func main() {
 
 	// Read input files.
 	type input struct {
-		data   []byte
+		file   *os.File
+		size   int64
 		cpu    uint32
 		subcpu uint32
 		offset int64
 	}
 	var inputs []input
+	var head [12]byte
+
 	offset := int64(align)
 	for _, i := range os.Args[2:] {
-		data, err := ioutil.ReadFile(i)
+		file, err := os.Open(i)
 		if err != nil {
 			panic(err)
 		}
-		if len(data) < 12 {
+		defer file.Close()
+		// Read the first 12 bytes of the file and reset the reader
+		fi, err := file.Stat()
+		if err != nil {
+			panic(err)
+		}
+		size := fi.Size()
+		if size < 12 {
 			panic(fmt.Sprintf("file %s too small", i))
 		}
+		n, err := file.Read(head[:])
+		if n != 12 {
+			panic(fmt.Sprintf("tried to read 12 bytes but was able to read %d", n))
+		}
+		if err != nil {
+			panic(err)
+		}
+		if _, err := file.Seek(0, 0); err != nil {
+			panic(err)
+		}
 		// All currently supported mac archs (386,amd64,arm,arm64) are little endian.
-		magic := binary.LittleEndian.Uint32(data[0:4])
+		magic := binary.LittleEndian.Uint32(head[0:4])
 		if magic != macho.Magic32 && magic != macho.Magic64 {
 			panic(fmt.Sprintf("input %s is not a macho file, magic=%x", i, magic))
 		}
-		cpu := binary.LittleEndian.Uint32(data[4:8])
-		subcpu := binary.LittleEndian.Uint32(data[8:12])
-		inputs = append(inputs, input{data: data, cpu: cpu, subcpu: subcpu, offset: offset})
-		offset += int64(len(data))
+		cpu := binary.LittleEndian.Uint32(head[4:8])
+		subcpu := binary.LittleEndian.Uint32(head[8:12])
+		inputs = append(inputs, input{file: file, cpu: cpu, subcpu: subcpu, size: size, offset: offset})
+		offset += size
 		offset = (offset + align - 1) / align * align
 	}
 
 	// Decide on whether we're doing fat32 or fat64.
 	sixtyfour := false
-	if inputs[len(inputs)-1].offset >= 1<<32 || len(inputs[len(inputs)-1].data) >= 1<<32 {
+	if inputs[len(inputs)-1].offset >= 1<<32 || inputs[len(inputs)-1].size >= 1<<32 {
 		sixtyfour = true
 		// fat64 doesn't seem to work:
 		//   - the resulting binary won't run.
@@ -93,9 +113,9 @@ func main() {
 		}
 		hdr = append(hdr, uint32(i.offset))
 		if sixtyfour {
-			hdr = append(hdr, uint32(len(i.data)>>32)) // big endian
+			hdr = append(hdr, uint32(i.size>>32)) // big endian
 		}
-		hdr = append(hdr, uint32(len(i.data)))
+		hdr = append(hdr, uint32(i.size))
 		hdr = append(hdr, alignBits)
 		if sixtyfour {
 			hdr = append(hdr, 0) // reserved
@@ -120,11 +140,14 @@ func main() {
 			}
 			offset = i.offset
 		}
-		_, err := out.Write(i.data)
+		n, err := io.Copy(out, i.file)
 		if err != nil {
 			panic(err)
 		}
-		offset += int64(len(i.data))
+		if n != i.size {
+			panic(fmt.Sprintf("expected to copy over %d bytes but copied over %d", i.size, n))
+		}
+		offset += int64(i.size)
 	}
 	err = out.Close()
 	if err != nil {

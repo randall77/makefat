@@ -85,7 +85,9 @@ func main() {
 		panic("files too large to fit into a fat binary")
 	}
 
-	// Make output file.
+	// Make output file. Remove it first, like lipo does, so that if it is
+	// also an input we keep reading the original instead of truncating it.
+	os.Remove(os.Args[1])
 	out, err := os.Create(os.Args[1])
 	if err != nil {
 		panic(err)
